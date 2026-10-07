@@ -9,48 +9,16 @@ import {
  * XTRACT ARCHIVE BOT PROTECTION
  * ============================================================
  *
- * Protected resource:
+ * Protected resources:
  *
- *     /data/*
+ *   /group/*
+ *   /data/*
  *
- * This layer is intentionally strict.
+ * Blocks known AI agents, chatbots, crawlers, HTTP clients,
+ * scraping frameworks, and obviously automated requests.
  *
- * It is designed to reject:
- *   - Codex
- *   - Claude Code
- *   - Gemini / Gemini CLI
- *   - Antigravity
- *   - Cursor
- *   - Copilot
- *   - OpenAI crawlers
- *   - Claude / Anthropic crawlers
- *   - Python requests
- *   - curl / wget
- *   - axios / fetch / undici
- *   - Scrapy
- *   - generic HTTP clients
- *   - requests with obviously forged/non-browser headers
- *
- * IMPORTANT:
- * User-Agent detection is NOT sufficient by itself.
- * A scraper can impersonate Chrome.
- *
- * Therefore this also checks:
- *   - browser Fetch Metadata headers
- *   - Accept headers
- *   - Referer
- *   - Turnstile session
- *   - request method
- *   - suspicious automation headers
- *
+ * A valid 5-minute Turnstile session is still required.
  * ============================================================
- */
-
-
-/*
- * ------------------------------------------------------------
- * 1. KNOWN AI / AUTOMATION IDENTIFIERS
- * ------------------------------------------------------------
  */
 
 const BLOCKED_USER_AGENTS = [
@@ -70,7 +38,7 @@ const BLOCKED_USER_AGENTS = [
   "google-extended",
   "googleother",
 
-  // Antigravity / AI IDEs / coding agents
+  // AI IDEs / coding agents
   "antigravity",
   "cursor",
   "copilot",
@@ -101,7 +69,7 @@ const BLOCKED_USER_AGENTS = [
   "bot/",
   "bot-",
 
-  // Programmatic Python clients
+  // Python HTTP clients
   "python-requests",
   "python-urllib",
   "urllib3",
@@ -129,7 +97,7 @@ const BLOCKED_USER_AGENTS = [
   "php/",
   "ruby",
 
-  // Scraping frameworks
+  // Scraping / browser automation
   "scrapy",
   "selenium",
   "playwright",
@@ -137,20 +105,6 @@ const BLOCKED_USER_AGENTS = [
   "headlesschrome",
   "phantomjs"
 ];
-
-
-/*
- * ------------------------------------------------------------
- * 2. SUSPICIOUS AUTOMATION HEADERS
- * ------------------------------------------------------------
- *
- * These are headers commonly associated with automation,
- * proxies, scraping libraries, or programmatic requests.
- *
- * We do NOT trust normal browser headers such as
- * X-Forwarded-For because infrastructure can add them.
- * ------------------------------------------------------------
- */
 
 const SUSPICIOUS_HEADERS = [
   "x-requested-with",
@@ -164,13 +118,6 @@ const SUSPICIOUS_HEADERS = [
   "x-selenium"
 ];
 
-
-/*
- * ------------------------------------------------------------
- * 3. KNOWN AUTOMATION HEADER VALUES
- * ------------------------------------------------------------
- */
-
 const AUTOMATION_HEADER_VALUES = [
   "selenium",
   "playwright",
@@ -182,13 +129,6 @@ const AUTOMATION_HEADER_VALUES = [
   "bot"
 ];
 
-
-/*
- * ------------------------------------------------------------
- * Utility: reject request
- * ------------------------------------------------------------
- */
-
 function forbidden(reason = "Forbidden") {
   return new NextResponse(reason, {
     status: 403,
@@ -199,13 +139,6 @@ function forbidden(reason = "Forbidden") {
     }
   });
 }
-
-
-/*
- * ------------------------------------------------------------
- * Utility: inspect User-Agent
- * ------------------------------------------------------------
- */
 
 function hasBlockedUserAgent(request) {
   const ua = (
@@ -221,13 +154,6 @@ function hasBlockedUserAgent(request) {
   );
 }
 
-
-/*
- * ------------------------------------------------------------
- * Utility: inspect suspicious custom headers
- * ------------------------------------------------------------
- */
-
 function hasSuspiciousHeaders(request) {
   for (const headerName of SUSPICIOUS_HEADERS) {
     if (request.headers.has(headerName)) {
@@ -235,20 +161,9 @@ function hasSuspiciousHeaders(request) {
     }
   }
 
-  /*
-   * Check all headers for explicit automation values.
-   *
-   * This intentionally ignores normal infrastructure headers.
-   */
-
   for (const [name, value] of request.headers.entries()) {
     const lowerName = name.toLowerCase();
     const lowerValue = value.toLowerCase();
-
-    /*
-     * Don't inspect harmless browser / infrastructure headers
-     * for generic words like "bot".
-     */
 
     if (
       lowerName === "user-agent" ||
@@ -280,24 +195,6 @@ function hasSuspiciousHeaders(request) {
   return false;
 }
 
-
-/*
- * ------------------------------------------------------------
- * Utility: browser Fetch Metadata
- * ------------------------------------------------------------
- *
- * Modern Chrome / Chromium browsers normally send these.
- *
- * For an image loaded from your own page:
- *
- *   Sec-Fetch-Dest: image
- *   Sec-Fetch-Mode: no-cors
- *   Sec-Fetch-Site: same-origin
- *
- * This makes raw HTTP scraping harder.
- * ------------------------------------------------------------
- */
-
 function hasInvalidFetchMetadata(request) {
   const destination =
     request.headers.get("sec-fetch-dest");
@@ -309,10 +206,15 @@ function hasInvalidFetchMetadata(request) {
     request.headers.get("sec-fetch-site");
 
   /*
-   * If these headers exist, make sure they are sensible.
+   * Group pages are documents.
+   * Image requests are images.
    */
-
-  if (destination && destination !== "image") {
+  if (
+    destination &&
+    destination !== "image" &&
+    destination !== "document" &&
+    destination !== "empty"
+  ) {
     return true;
   }
 
@@ -320,7 +222,8 @@ function hasInvalidFetchMetadata(request) {
     mode &&
     mode !== "no-cors" &&
     mode !== "cors" &&
-    mode !== "same-origin"
+    mode !== "same-origin" &&
+    mode !== "navigate"
   ) {
     return true;
   }
@@ -337,30 +240,30 @@ function hasInvalidFetchMetadata(request) {
   return false;
 }
 
-
-/*
- * ------------------------------------------------------------
- * Utility: inspect Accept header
- * ------------------------------------------------------------
- */
-
 function hasInvalidAcceptHeader(request) {
   const accept =
     request.headers.get("accept") || "";
 
-  /*
-   * A real browser requesting an image normally accepts
-   * image formats or */
-   /*
-   * A request explicitly advertising only JSON/text is
-   * suspicious for an image endpoint.
-   */
+  if (!accept) {
+    return false;
+  }
 
   const lower = accept.toLowerCase();
 
+  /*
+   * Allow both:
+   *
+   * Group pages:
+   *   text/html
+   *
+   * Images:
+   *   image/*
+   *
+   * Browsers:
+   *   */
   if (
-    lower &&
     !lower.includes("image/") &&
+    !lower.includes("text/html") &&
     !lower.includes("*/*")
   ) {
     return true;
@@ -369,25 +272,13 @@ function hasInvalidAcceptHeader(request) {
   return false;
 }
 
-
-/*
- * ------------------------------------------------------------
- * Utility: inspect Referer
- * ------------------------------------------------------------
- */
-
 function hasBadReferer(request) {
   const referer =
     request.headers.get("referer");
 
   /*
-   * Directly opening an image URL may have no Referer.
-   *
-   * We allow that here because otherwise legitimate users
-   * opening an image in a new tab could be blocked.
-   *
-   * If a Referer exists, however, it must point back to
-   * this site.
+   * No Referer is allowed.
+   * This permits users to open an image directly.
    */
 
   if (!referer) {
@@ -396,17 +287,11 @@ function hasBadReferer(request) {
 
   try {
     const url = new URL(referer);
-
-    const requestUrl =
-      new URL(request.url);
+    const requestUrl = new URL(request.url);
 
     if (url.hostname !== requestUrl.hostname) {
       return true;
     }
-
-    /*
-     * Only allow HTTPS in production.
-     */
 
     if (
       requestUrl.protocol === "https:" &&
@@ -421,13 +306,6 @@ function hasBadReferer(request) {
   }
 }
 
-
-/*
- * ------------------------------------------------------------
- * Utility: suspicious browser fingerprint
- * ------------------------------------------------------------
- */
-
 function hasSuspiciousBrowserProfile(request) {
   const ua =
     request.headers.get("user-agent") || "";
@@ -439,10 +317,9 @@ function hasSuspiciousBrowserProfile(request) {
     request.headers.get("accept-encoding");
 
   /*
-   * A request claiming to be Chrome but carrying essentially
-   * no normal browser negotiation headers is suspicious.
+   * Browser-like User-Agent but missing normal
+   * browser negotiation headers.
    */
-
   if (
     /chrome|chromium|edg|firefox|safari/i.test(ua)
   ) {
@@ -458,123 +335,76 @@ function hasSuspiciousBrowserProfile(request) {
   return false;
 }
 
-
-/*
- * ------------------------------------------------------------
- * Utility: request method
- * ------------------------------------------------------------
- */
-
 function hasInvalidMethod(request) {
   return request.method !== "GET";
 }
 
-
-/*
- * ------------------------------------------------------------
- * MAIN PROXY
- * ------------------------------------------------------------
- */
-
 export async function proxy(request) {
+  const pathname = request.nextUrl.pathname;
 
   /*
-   * ----------------------------------------------------------
-   * STEP 1
-   * Only GET requests are valid for /data/*
-   * ----------------------------------------------------------
+   * Only protect archive groups and their images.
    */
+  const isProtected =
+    pathname.startsWith("/group/") ||
+    pathname.startsWith("/data/");
 
+  if (!isProtected) {
+    return NextResponse.next();
+  }
+
+  /*
+   * 1. Only GET requests.
+   */
   if (hasInvalidMethod(request)) {
     return forbidden();
   }
 
-
   /*
-   * ----------------------------------------------------------
-   * STEP 2
-   * Kill known AI agents / crawlers / HTTP clients.
-   * ----------------------------------------------------------
+   * 2. Block known AI / chatbot / crawler User-Agents.
    */
-
   if (hasBlockedUserAgent(request)) {
     return forbidden();
   }
 
-
   /*
-   * ----------------------------------------------------------
-   * STEP 3
-   * Kill explicit automation headers.
-   * ----------------------------------------------------------
+   * 3. Block explicit automation headers.
    */
-
   if (hasSuspiciousHeaders(request)) {
     return forbidden();
   }
 
-
   /*
-   * ----------------------------------------------------------
-   * STEP 4
-   * Validate browser Fetch Metadata.
-   * ----------------------------------------------------------
+   * 4. Validate browser Fetch Metadata.
    */
-
   if (hasInvalidFetchMetadata(request)) {
     return forbidden();
   }
 
-
   /*
-   * ----------------------------------------------------------
-   * STEP 5
-   * Validate image Accept header.
-   * ----------------------------------------------------------
+   * 5. Validate Accept header.
    */
-
   if (hasInvalidAcceptHeader(request)) {
     return forbidden();
   }
 
-
   /*
-   * ----------------------------------------------------------
-   * STEP 6
-   * Validate Referer when one is supplied.
-   * ----------------------------------------------------------
+   * 6. Validate Referer when supplied.
    */
-
   if (hasBadReferer(request)) {
     return forbidden();
   }
 
-
   /*
-   * ----------------------------------------------------------
-   * STEP 7
-   * Reject suspicious "Chrome" requests with obviously
-   * incomplete browser negotiation.
-   * ----------------------------------------------------------
+   * 7. Validate browser profile.
    */
-
   if (hasSuspiciousBrowserProfile(request)) {
     return forbidden();
   }
 
-
   /*
-   * ----------------------------------------------------------
-   * STEP 8
-   * REQUIRE VALID TURNSTILE SESSION.
-   *
-   * This is the important part.
-   *
-   * Even if somebody spoofs Chrome headers, they still need
-   * your signed xtract_verified session cookie.
-   * ----------------------------------------------------------
+   * 8. Require valid 5-minute Turnstile session.
    */
-
   const session =
     request.cookies.get(COOKIE_NAME)?.value;
 
@@ -585,28 +415,15 @@ export async function proxy(request) {
     return forbidden();
   }
 
-
   /*
-   * ----------------------------------------------------------
-   * STEP 9
-   * Everything passed.
-   *
-   * Allow Next.js/Vercel to serve the image.
-   * ----------------------------------------------------------
+   * 9. Everything passed.
    */
-
   return NextResponse.next();
 }
 
-
-/*
- * ------------------------------------------------------------
- * MATCH ONLY THE IMAGE/DATA DIRECTORY
- * ------------------------------------------------------------
- */
-
 export const config = {
   matcher: [
+    "/group/:path*",
     "/data/:path*"
   ]
 };
