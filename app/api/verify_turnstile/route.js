@@ -3,7 +3,7 @@ import {
   createSessionValue,
   COOKIE_NAME,
   SESSION_DURATION
-} from "@/lib/session";
+} from "../../../lib/session";
 
 export const runtime = "edge";
 

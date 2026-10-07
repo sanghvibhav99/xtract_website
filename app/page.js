@@ -14,7 +14,7 @@ export default async function Home() {
             <h1>Archive</h1>
             <p>Verification required.</p>
 
-            <form action="/api/verify-turnstile" method="POST">
+            <form action="/api/verify_turnstile" method="POST">
               <div
                 className="cf-turnstile"
                 data-sitekey={process.env.TURNSTILE_SITE_KEY}
