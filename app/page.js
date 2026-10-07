@@ -35,30 +35,20 @@ export default async function Home() {
           </header>
 
           <div className="grid">
-            {Array.from({ length: 780 }, (_, index) => {
-              const number = String(index + 1).padStart(4, "0");
-              const filename = `image_${number}.jpg`;
+            {Array.from({ length: 779 }, (_, index) => {
+  const groupNumber = String(index + 1).padStart(4, "0");
+  const groupPath = `/data/group_${groupNumber}`;
 
-              return (
-                <div className="item" key={filename}>
-                  <a
-                    href={`/data/${filename}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <img
-                      src={`/data/${filename}`}
-                      alt={`Image ${index + 1}`}
-                      loading="lazy"
-                    />
-
-                    <div className="number">
-                      Image {index + 1}
-                    </div>
-                  </a>
-                </div>
-              );
-            })}
+  return (
+    <div className="item" key={groupNumber}>
+      <a href={groupPath}>
+        <div className="number">
+          Group {index + 1}
+        </div>
+      </a>
+    </div>
+  );
+})}
           </div>
         </>
       )}
