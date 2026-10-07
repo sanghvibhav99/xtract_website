@@ -37,7 +37,7 @@ export default async function Home() {
           <div className="grid">
             {Array.from({ length: 779 }, (_, index) => {
   const groupNumber = String(index + 1).padStart(4, "0");
-  const groupPath = `/data/group_${groupNumber}`;
+  const groupPath = `/group/${index + 1}`;
 
   return (
     <div className="item" key={groupNumber}>
